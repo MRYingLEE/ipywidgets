@@ -35,7 +35,7 @@ import { CodeCell } from '@jupyterlab/cells';
 
 import { filter } from '@lumino/algorithm';
 
-import { DisposableDelegate } from '@lumino/disposable';
+import { DisposableDelegate, IDisposable } from '@lumino/disposable';
 
 import { WidgetRenderer } from './renderer';
 
@@ -60,6 +60,12 @@ import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 import { ISessionContext } from '@jupyterlab/apputils';
 import { ISignal, Signal } from '@lumino/signaling';
 
+import {
+  IWidgetManagerProvider,
+  WidgetManagerProvider,
+} from './widget-manager-provider';
+import { registerWidgetInput } from './widget-input';
+
 class WidgetRegistry {
   get widgets(): base.IWidgetRegistryData[] {
     return [...this._registry];
@@ -83,6 +89,7 @@ class WidgetRegistry {
 }
 
 const WIDGET_REGISTRY = new WidgetRegistry();
+const WIDGET_MANAGER_PROVIDER = new WidgetManagerProvider();
 
 /**
  * The cached settings.
@@ -193,6 +200,7 @@ async function registerWidgetHandler(
   sessionContext: ISessionContext,
   rendermime: IRenderMimeRegistry,
   renderers: IterableIterator<WidgetRenderer>,
+  panelRenderers: () => Iterable<WidgetRenderer>,
   widgetManagerFactory: () => WidgetManager | KernelWidgetManager
 ): Promise<DisposableDelegate> {
   const wManagerOwner = await getWidgetManagerOwner(sessionContext);
@@ -229,6 +237,11 @@ async function registerWidgetHandler(
     });
   }
 
+  WIDGET_MANAGER_PROVIDER.register(content, wManager, panelRenderers);
+  content.disposed.connect(() => {
+    WIDGET_MANAGER_PROVIDER.unregister(content, wManager!);
+  });
+
   for (const r of renderers) {
     r.manager = wManager;
   }
@@ -246,6 +259,7 @@ async function registerWidgetHandler(
   );
 
   return new DisposableDelegate(() => {
+    WIDGET_MANAGER_PROVIDER.unregister(content, wManager!);
     if (rendermime) {
       rendermime.removeMimeType(WIDGET_VIEW_MIMETYPE);
     }
@@ -319,6 +333,7 @@ export async function registerNotebookWidgetManager(
     sessionContext,
     rendermime,
     renderers,
+    () => notebookWidgetRenderers(content),
     widgetManagerFactory
   );
 }
@@ -338,6 +353,7 @@ export async function registerConsoleWidgetManager(
     sessionContext,
     rendermime,
     renderers,
+    () => consoleWidgetRenderers(content),
     widgetManagerFactory
   );
 }
@@ -361,6 +377,47 @@ export const managerPlugin: JupyterFrontEndPlugin<base.IJupyterWidgetRegistry> =
     activate: activateWidgetExtension,
     autoStart: true,
   };
+
+export const widgetManagerProviderPlugin: JupyterFrontEndPlugin<IWidgetManagerProvider> =
+  {
+    id: '@jupyter-widgets/jupyterlab-manager:manager-provider',
+    requires: [base.IJupyterWidgetRegistry],
+    provides: IWidgetManagerProvider,
+    autoStart: true,
+    activate: () => ({
+      getManager: (panel) => WIDGET_MANAGER_PROVIDER.getManager(panel),
+      getDisplayedModel: (panel, modelId) =>
+        WIDGET_MANAGER_PROVIDER.getDisplayedModel(panel, modelId),
+    }),
+  };
+
+const widgetInputRegistrations = new WeakMap<JupyterFrontEnd, IDisposable>();
+
+export const widgetInputPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-widgets/jupyterlab-manager:widget-input',
+  requires: [IWidgetManagerProvider],
+  optional: [INotebookTracker, IConsoleTracker, ITranslator],
+  autoStart: true,
+  activate: (app, provider, tracker, consoleTracker, translator) => {
+    if (tracker || consoleTracker) {
+      const registration = registerWidgetInput(
+        tracker,
+        consoleTracker,
+        provider,
+        translator
+      );
+      if (registration) {
+        widgetInputRegistrations.set(app, registration);
+      } else {
+        console.warn('Widget input requires a JupyterLab stdin-handler seam.');
+      }
+    }
+  },
+  deactivate: (app) => {
+    widgetInputRegistrations.get(app)?.dispose();
+    widgetInputRegistrations.delete(app);
+  },
+};
 
 function updateSettings(settings: ISettingRegistry.ISettings): void {
   SETTINGS.saveState = settings.get('saveState').composite as boolean;
@@ -579,6 +636,8 @@ export const outputWidgetPlugin: JupyterFrontEndPlugin<void> = {
 
 export default [
   managerPlugin,
+  widgetManagerProviderPlugin,
+  widgetInputPlugin,
   baseWidgetsPlugin,
   controlWidgetsPlugin,
   outputWidgetPlugin,

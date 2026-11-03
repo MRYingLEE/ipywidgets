@@ -16,4 +16,15 @@ export {
 
 export { WidgetRenderer } from './renderer';
 
+export { IWidgetManagerProvider } from './widget-manager-provider';
+
+export {
+  WIDGET_INPUT_MARKER,
+  WidgetInputProtocolError,
+  parseWidgetInputRequest,
+  encodeWidgetInputState,
+  encodeWidgetInputFailure,
+} from './widget-input-protocol';
+export type { IWidgetInputRequest } from './widget-input-protocol';
+
 export { output };

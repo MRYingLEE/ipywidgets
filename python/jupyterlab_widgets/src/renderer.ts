@@ -38,6 +38,31 @@ export class WidgetRenderer
     this._manager.resolve(value);
   }
 
+  /**
+   * Return the live model represented by an attached, visible view belonging
+   * to the given manager. This does not authorize a client request.
+   */
+  getDisplayedModel(manager: LabWidgetManager): DOMWidgetModel | undefined {
+    const displayed = this._displayed;
+    if (
+      !displayed ||
+      displayed.manager !== manager ||
+      this.isDisposed ||
+      !this.isAttached ||
+      !this.isVisible ||
+      displayed.widget.isDisposed ||
+      !displayed.widget.isAttached ||
+      !displayed.widget.isVisible ||
+      !this.node.contains(displayed.widget.node) ||
+      !displayed.widget.node.getClientRects().length ||
+      window.getComputedStyle(displayed.widget.node).visibility !== 'visible' ||
+      !displayed.model.comm_live
+    ) {
+      return undefined;
+    }
+    return displayed.model;
+  }
+
   async renderModel(model: IRenderMime.IMimeModel): Promise<void> {
     const source: any = model.data[this.mimeType];
 
@@ -86,10 +111,14 @@ export class WidgetRenderer
     // Clear any previous loading message.
     this.node.textContent = '';
     this.addWidget(widget);
+    this._displayed = { manager, model: wModel, widget };
 
     // When the widget is disposed, hide this container and make sure we
     // change the output model to reflect the view was closed.
     widget.disposed.connect(() => {
+      if (this._displayed?.widget === widget) {
+        this._displayed = undefined;
+      }
       this.hide();
       source.model_id = '';
     });
@@ -123,4 +152,11 @@ export class WidgetRenderer
   readonly mimeType: string;
   private _manager = new PromiseDelegate<LabWidgetManager>();
   private _rerenderMimeModel: IRenderMime.IMimeModel | null = null;
+  private _displayed:
+    | {
+        manager: LabWidgetManager;
+        model: DOMWidgetModel;
+        widget: LuminoWidget;
+      }
+    | undefined;
 }

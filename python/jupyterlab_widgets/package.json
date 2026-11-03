@@ -42,6 +42,8 @@
     "eslint": "eslint . --ext .ts,.tsx --fix",
     "eslint:check": "eslint . --ext .ts,.tsx",
     "install:extension": "jlpm build",
+    "test:manager-provider": "node --experimental-strip-types --test test/widget-manager-provider.test.mjs",
+    "test:widget-input-protocol": "node --experimental-strip-types --test test/widget-input-protocol.test.mjs",
     "prepare": "jlpm clean && jlpm build:prod",
     "watch": "jupyter-builder watch ."
   },
