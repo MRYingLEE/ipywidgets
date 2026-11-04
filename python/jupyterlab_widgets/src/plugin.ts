@@ -25,6 +25,8 @@ import {
   JupyterFrontEnd,
 } from '@jupyterlab/application';
 
+import { IEditorServices } from '@jupyterlab/codeeditor';
+
 import { IMainMenu } from '@jupyterlab/mainmenu';
 
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
@@ -64,7 +66,11 @@ import {
   IWidgetManagerProvider,
   WidgetManagerProvider,
 } from './widget-manager-provider';
-import { registerWidgetInput } from './widget-input';
+import { configureWidgetInput } from './widget-input';
+import {
+  ConsoleWidgetInputContentFactory,
+  NotebookWidgetInputContentFactory,
+} from './widget-input-content-factory';
 
 class WidgetRegistry {
   get widgets(): base.IWidgetRegistryData[] {
@@ -399,25 +405,52 @@ export const widgetInputPlugin: JupyterFrontEndPlugin<void> = {
   optional: [INotebookTracker, IConsoleTracker, ITranslator],
   autoStart: true,
   activate: (app, provider, tracker, consoleTracker, translator) => {
-    if (tracker || consoleTracker) {
-      const registration = registerWidgetInput(
-        tracker,
-        consoleTracker,
-        provider,
-        translator
-      );
-      if (registration) {
-        widgetInputRegistrations.set(app, registration);
-      } else {
-        console.warn('Widget input requires a JupyterLab stdin-handler seam.');
-      }
-    }
+    widgetInputRegistrations.set(
+      app,
+      configureWidgetInput(tracker, consoleTracker, provider, translator)
+    );
   },
   deactivate: (app) => {
     widgetInputRegistrations.get(app)?.dispose();
     widgetInputRegistrations.delete(app);
   },
 };
+
+/**
+ * Replaces the notebook content factory so that widget-input stdin requests
+ * are routed to the bridge. Requires only the editor services so that it
+ * does not form a dependency cycle with the notebook tracker.
+ */
+export const notebookWidgetInputContentFactoryPlugin: JupyterFrontEndPlugin<NotebookPanel.IContentFactory> =
+  {
+    id: '@jupyter-widgets/jupyterlab-manager:notebook-widget-input-content-factory',
+    description: 'Routes notebook widget-input stdin requests to the bridge.',
+    provides: NotebookPanel.IContentFactory,
+    requires: [IEditorServices],
+    autoStart: true,
+    activate: (_app, editorServices) =>
+      new NotebookWidgetInputContentFactory({
+        editorFactory: editorServices.factoryService.newInlineEditor,
+      }),
+  };
+
+/**
+ * Replaces the console content factory so that widget-input stdin requests
+ * are routed to the bridge. Requires only the editor services so that it
+ * does not form a dependency cycle with the console tracker.
+ */
+export const consoleWidgetInputContentFactoryPlugin: JupyterFrontEndPlugin<ConsolePanel.IContentFactory> =
+  {
+    id: '@jupyter-widgets/jupyterlab-manager:console-widget-input-content-factory',
+    description: 'Routes console widget-input stdin requests to the bridge.',
+    provides: ConsolePanel.IContentFactory,
+    requires: [IEditorServices],
+    autoStart: true,
+    activate: (_app, editorServices) =>
+      new ConsoleWidgetInputContentFactory({
+        editorFactory: editorServices.factoryService.newInlineEditor,
+      }),
+  };
 
 function updateSettings(settings: ISettingRegistry.ISettings): void {
   SETTINGS.saveState = settings.get('saveState').composite as boolean;
@@ -638,6 +671,8 @@ export default [
   managerPlugin,
   widgetManagerProviderPlugin,
   widgetInputPlugin,
+  notebookWidgetInputContentFactoryPlugin,
+  consoleWidgetInputContentFactoryPlugin,
   baseWidgetsPlugin,
   controlWidgetsPlugin,
   outputWidgetPlugin,

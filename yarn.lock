@@ -1063,6 +1063,7 @@ __metadata:
     "@jupyterlab/application": ^4.0.0
     "@jupyterlab/apputils": ^4.0.0
     "@jupyterlab/cells": ^4.0.0
+    "@jupyterlab/codeeditor": ^4.0.0
     "@jupyterlab/console": ^4.0.0
     "@jupyterlab/docregistry": ^4.0.0
     "@jupyterlab/logconsole": ^4.0.0
@@ -1337,7 +1338,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jupyterlab/codeeditor@npm:^4.6.2":
+"@jupyterlab/codeeditor@npm:^4.0.0, @jupyterlab/codeeditor@npm:^4.6.2":
   version: 4.6.2
   resolution: "@jupyterlab/codeeditor@npm:4.6.2"
   dependencies:

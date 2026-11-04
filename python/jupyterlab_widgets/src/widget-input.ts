@@ -26,116 +26,50 @@ import {
   parseWidgetInputRequest,
 } from './widget-input-protocol';
 
-type StdinHandler = (
-  output: OutputArea,
-  request: KernelMessage.IInputRequestMsg,
-  options: Stdin.IOptions
-) => IStdin | undefined;
-
-type OutputAreaWithHandlers = typeof OutputArea & {
-  registerStdinHandler(handler: StdinHandler): IDisposable;
-};
-
-function supportsHandlers(
-  outputArea: typeof OutputArea
-): outputArea is OutputAreaWithHandlers {
-  return (
-    'registerStdinHandler' in outputArea &&
-    typeof outputArea.registerStdinHandler === 'function'
-  );
-}
-
 function sessionContext(panel: NotebookPanel | ConsolePanel) {
   return 'console' in panel
     ? panel.console.sessionContext
     : panel.context.sessionContext;
 }
 
+interface IWidgetInputContext {
+  readonly tracker: INotebookTracker | null;
+  readonly consoleTracker: IConsoleTracker | null;
+  readonly provider: IWidgetManagerProvider;
+  readonly trans: TranslationBundle;
+  readonly activeInputs: Set<WidgetInput>;
+}
+
+interface IWidgetInputOwner {
+  readonly panel: NotebookPanel | ConsolePanel;
+  readonly cell: CodeCell;
+}
+
+let context: IWidgetInputContext | undefined;
+
 /**
- * Register the widget-input handler when the host exposes the
- * composable stdin seam. Returns undefined on hosts without that seam.
+ * Connect the widget-input bridge to the open notebook and console panels.
+ * Until this is called, `createWidgetInputStdin` returns undefined.
  */
-export function registerWidgetInput(
+export function configureWidgetInput(
   tracker: INotebookTracker | null,
   consoleTracker: IConsoleTracker | null,
   provider: IWidgetManagerProvider,
   translator: ITranslator | null
-): IDisposable | undefined {
-  if (!supportsHandlers(OutputArea)) {
-    return undefined;
-  }
-  const trans = (translator ?? nullTranslator).load('jupyterlab');
+): IDisposable {
   const activeInputs = new Set<WidgetInput>();
-  const registration = OutputArea.registerStdinHandler(
-    (output, message, options) => {
-      if (message.content.password) {
-        return undefined;
-      }
-
-      let request: IWidgetInputRequest | undefined;
-      try {
-        request = parseWidgetInputRequest(message.content.prompt);
-      } catch (error) {
-        if (!(error instanceof WidgetInputProtocolError)) {
-          throw error;
-        }
-        return new WidgetInputError(options, 'invalid_request', trans);
-      }
-      if (!request) {
-        return undefined;
-      }
-
-      const owners: (NotebookPanel | ConsolePanel)[] = [];
-      tracker?.forEach((panel) => {
-        if (
-          panel.content.widgets.some(
-            (cell) => cell instanceof CodeCell && cell.outputArea === output
-          )
-        ) {
-          owners.push(panel);
-        }
-      });
-      consoleTracker?.forEach((panel) => {
-        if (
-          Array.from(panel.console.cells).some(
-            (cell) => cell instanceof CodeCell && cell.outputArea === output
-          )
-        ) {
-          owners.push(panel);
-        }
-      });
-      const panel = owners.length === 1 ? owners[0] : undefined;
-      const kernel = panel && sessionContext(panel).session?.kernel;
-      const header = options.future.msg.header;
-      if (
-        !panel ||
-        !kernel ||
-        panel.isDisposed ||
-        kernel.isDisposed ||
-        output.future !== options.future ||
-        header.msg_type !== 'execute_request' ||
-        message.parent_header.msg_id !== header.msg_id ||
-        message.parent_header.session !== header.session ||
-        header.session !== kernel.clientId
-      ) {
-        return new WidgetInputError(options, 'owner_unavailable', trans);
-      }
-      const input = new WidgetInput(
-        output,
-        panel,
-        kernel,
-        options,
-        provider,
-        request,
-        trans
-      );
-      activeInputs.add(input);
-      input.disposed.connect(() => activeInputs.delete(input));
-      return input;
-    }
-  );
+  const current: IWidgetInputContext = {
+    tracker,
+    consoleTracker,
+    provider,
+    trans: (translator ?? nullTranslator).load('jupyterlab'),
+    activeInputs,
+  };
+  context = current;
   return new DisposableDelegate(() => {
-    registration.dispose();
+    if (context === current) {
+      context = undefined;
+    }
     for (const input of activeInputs) {
       input.dispose();
     }
@@ -143,10 +77,102 @@ export function registerWidgetInput(
   });
 }
 
+/**
+ * Find the code cells whose output area is currently running `options.future`.
+ */
+function findOwners(
+  options: Stdin.IOptions,
+  current: IWidgetInputContext
+): IWidgetInputOwner[] {
+  const owners: IWidgetInputOwner[] = [];
+  current.tracker?.forEach((panel) => {
+    for (const cell of panel.content.widgets) {
+      if (
+        cell instanceof CodeCell &&
+        cell.outputArea.future === options.future
+      ) {
+        owners.push({ panel, cell });
+      }
+    }
+  });
+  current.consoleTracker?.forEach((panel) => {
+    for (const cell of Array.from(panel.console.cells)) {
+      if (
+        cell instanceof CodeCell &&
+        cell.outputArea.future === options.future
+      ) {
+        owners.push({ panel, cell });
+      }
+    }
+  });
+  return owners;
+}
+
+/**
+ * Create the widget-input stdin for a stdin request. Returns undefined when
+ * the request is not a widget-input request, so the default stdin is used.
+ */
+export function createWidgetInputStdin(
+  options: Stdin.IOptions
+): IStdin | undefined {
+  const current = context;
+  if (!current || options.password) {
+    return undefined;
+  }
+  const trans = current.trans;
+
+  let request: IWidgetInputRequest | undefined;
+  try {
+    request = parseWidgetInputRequest(options.prompt);
+  } catch (error) {
+    if (!(error instanceof WidgetInputProtocolError)) {
+      throw error;
+    }
+    return new WidgetInputError(options, 'invalid_request', trans);
+  }
+  if (!request) {
+    return undefined;
+  }
+
+  const owners = findOwners(options, current);
+  const owner = owners.length === 1 ? owners[0] : undefined;
+  const kernel = owner
+    ? sessionContext(owner.panel).session?.kernel
+    : undefined;
+  const header = options.future.msg.header;
+  if (
+    !owner ||
+    !kernel ||
+    owner.panel.isDisposed ||
+    kernel.isDisposed ||
+    header.msg_type !== 'execute_request' ||
+    header.session !== kernel.clientId
+  ) {
+    return new WidgetInputError(options, 'owner_unavailable', trans);
+  }
+  const input = new WidgetInput(
+    owner.cell,
+    owner.cell.outputArea,
+    owner.panel,
+    kernel,
+    options,
+    current.provider,
+    request,
+    trans
+  );
+  current.activeInputs.add(input);
+  input.disposed.connect(() => current.activeInputs.delete(input));
+  return input;
+}
+
 class WidgetInputError extends Widget implements IStdin {
   constructor(options: Stdin.IOptions, code: string, trans: TranslationBundle) {
     super();
     this.node.textContent = trans.__('Widget input could not be started.');
+    // Same hidden sentinel as WidgetInput: OutputArea calls focus() on the first <input>.
+    const sentinel = document.createElement('input');
+    sentinel.type = 'hidden';
+    this.node.append(sentinel);
     queueMicrotask(() => {
       try {
         options.future.sendInputReply(
@@ -170,6 +196,7 @@ class WidgetInputError extends Widget implements IStdin {
 
 class WidgetInput extends Widget implements IStdin {
   constructor(
+    private readonly _cell: CodeCell,
     private readonly _output: OutputArea,
     private readonly _panel: NotebookPanel | ConsolePanel,
     private readonly _kernel: Kernel.IKernelConnection,
@@ -197,11 +224,20 @@ class WidgetInput extends Widget implements IStdin {
     this._cancel = document.createElement('button');
     this._cancel.type = 'button';
     this._cancel.textContent = _trans.__('Cancel');
-    this.node.append(prompt, this._status, this._submit, this._cancel);
+    // OutputArea calls focus() on the first <input> of a stdin widget after the reply; a hidden one makes that a no-op.
+    const sentinel = document.createElement('input');
+    sentinel.type = 'hidden';
+    this.node.append(
+      prompt,
+      this._status,
+      this._submit,
+      this._cancel,
+      sentinel
+    );
     this._submit.addEventListener('click', this._onSubmit);
     this._cancel.addEventListener('click', this._onCancel);
     this.node.addEventListener('keydown', this._onKeyDown);
-    _panel.disposed.connect(this._onOwnerDisposed, this);
+    sessionContext(_panel).disposed.connect(this._onOwnerDisposed, this);
     sessionContext(_panel).kernelChanged.connect(this._onKernelChanged, this);
     _kernel.statusChanged.connect(this._onStatusChanged, this);
     void _options.future.done.then(
@@ -390,11 +426,26 @@ class WidgetInput extends Widget implements IStdin {
         { status: 'ok', value },
         this._options.parent_header
       );
-      this._value.resolve(summary);
+      this._finish(summary);
     } catch (error) {
       console.error('Could not send widget input reply:', error);
-      this._value.resolve(this._trans.__('[Widget input failed]'));
+      this._finish(this._trans.__('[Widget input failed]'));
     }
+  }
+
+  /**
+   * Resolve the stdin value so the output area echoes the summary. If the
+   * output area now belongs to a newer future, stay pending: the echo would
+   * otherwise land in that execution's output.
+   */
+  private _finish(summary: string): void {
+    if (this._output.future !== this._options.future) {
+      return;
+    }
+    if (this.node.contains(document.activeElement)) {
+      this._cell.editor?.focus();
+    }
+    this._value.resolve(summary);
   }
 
   private _cancelOnDisposal(): void {
@@ -421,14 +472,17 @@ class WidgetInput extends Widget implements IStdin {
     if (!this._settled) {
       this._settled = true;
       this._cleanup();
-      this._value.resolve(this._trans.__('[Widget input closed]'));
+      this._finish(this._trans.__('[Widget input closed]'));
     }
   }
 
   private _cleanup(): void {
     window.clearTimeout(this._deadline);
     window.clearTimeout(this._poll);
-    this._panel.disposed.disconnect(this._onOwnerDisposed, this);
+    sessionContext(this._panel).disposed.disconnect(
+      this._onOwnerDisposed,
+      this
+    );
     sessionContext(this._panel).kernelChanged.disconnect(
       this._onKernelChanged,
       this
