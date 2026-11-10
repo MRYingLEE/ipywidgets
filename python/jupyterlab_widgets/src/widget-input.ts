@@ -224,7 +224,10 @@ class WidgetInput extends Widget implements IStdin {
     this._cancel = document.createElement('button');
     this._cancel.type = 'button';
     this._cancel.textContent = _trans.__('Cancel');
-    this._cancel.style.marginInlineStart = '2em';
+    // Equal widths make the gap exactly half a button width.
+    this._submit.style.minWidth = '6em';
+    this._cancel.style.minWidth = '6em';
+    this._cancel.style.marginInlineStart = '3em';
     // OutputArea calls focus() on the first <input> of a stdin widget after the reply; a hidden one makes that a no-op.
     const sentinel = document.createElement('input');
     sentinel.type = 'hidden';
