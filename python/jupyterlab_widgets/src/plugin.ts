@@ -70,6 +70,7 @@ import { configureWidgetInput } from './widget-input';
 import {
   ConsoleWidgetInputContentFactory,
   NotebookWidgetInputContentFactory,
+  NotebookWidgetInputFooterContentFactory,
 } from './widget-input-content-factory';
 
 class WidgetRegistry {
@@ -428,10 +429,14 @@ export const notebookWidgetInputContentFactoryPlugin: JupyterFrontEndPlugin<Note
     provides: NotebookPanel.IContentFactory,
     requires: [IEditorServices],
     autoStart: true,
-    activate: (_app, editorServices) =>
-      new NotebookWidgetInputContentFactory({
+    activate: (app, editorServices) => {
+      const Factory = app.hasPlugin('jupyterlab-cell-input-footer:token')
+        ? NotebookWidgetInputFooterContentFactory
+        : NotebookWidgetInputContentFactory;
+      return new Factory({
         editorFactory: editorServices.factoryService.newInlineEditor,
-      }),
+      });
+    },
   };
 
 /**
