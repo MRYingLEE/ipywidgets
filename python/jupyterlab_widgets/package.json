@@ -27,7 +27,8 @@
     "lib/**/*.{d.ts,eot,gif,html,jpg,js,js.map,json,png,svg,woff2,ttf}",
     "style/**/*.{css,eot,gif,html,jpg,json,png,svg,woff2,ttf}",
     "dist/*.js",
-    "schema/*.json"
+    "schema/*.json",
+    "vendor/a2ui-form/**/*"
   ],
   "scripts": {
     "build": "jlpm build:lib && jlpm build:labextension:dev",
@@ -42,6 +43,8 @@
     "eslint": "eslint . --ext .ts,.tsx --fix",
     "eslint:check": "eslint . --ext .ts,.tsx",
     "install:extension": "jlpm build",
+    "sync:a2ui-form": "node scripts/sync-a2ui-form.mjs",
+    "test:a2ui-input-protocol": "node --experimental-strip-types --test test/a2ui-input-protocol.test.mjs",
     "test:manager-provider": "node --experimental-strip-types --test test/widget-manager-provider.test.mjs",
     "test:widget-input-protocol": "node --experimental-strip-types --test test/widget-input-protocol.test.mjs",
     "prepare": "jlpm clean && jlpm build:prod",

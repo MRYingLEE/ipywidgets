@@ -1,5 +1,6 @@
 {
   "root": true,
+  "ignorePatterns": ["**/vendor/**"],
   "extends": [
     "eslint:recommended",
     "plugin:@typescript-eslint/eslint-recommended",

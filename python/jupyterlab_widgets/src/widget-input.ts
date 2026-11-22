@@ -17,6 +17,14 @@ import { Widget } from '@lumino/widgets';
 
 import { DOMWidgetModel } from '@jupyter-widgets/base';
 
+import {
+  A2UI_INPUT_MARKER,
+  A2uiInput,
+  A2uiInputError,
+  A2uiInputRequest,
+  encodeA2uiInputFailure,
+  parseA2uiInputRequest,
+} from './a2ui-input';
 import { IWidgetManagerProvider } from './widget-manager-provider';
 import {
   IWidgetInputRequest,
@@ -37,7 +45,7 @@ interface IWidgetInputContext {
   readonly consoleTracker: IConsoleTracker | null;
   readonly provider: IWidgetManagerProvider;
   readonly trans: TranslationBundle;
-  readonly activeInputs: Set<WidgetInput>;
+  readonly activeInputs: Set<Widget>;
 }
 
 interface IWidgetInputOwner {
@@ -57,7 +65,7 @@ export function configureWidgetInput(
   provider: IWidgetManagerProvider,
   translator: ITranslator | null
 ): IDisposable {
-  const activeInputs = new Set<WidgetInput>();
+  const activeInputs = new Set<Widget>();
   const current: IWidgetInputContext = {
     tracker,
     consoleTracker,
@@ -109,8 +117,8 @@ function findOwners(
 }
 
 /**
- * Create the widget-input stdin for a stdin request. Returns undefined when
- * the request is not a widget-input request, so the default stdin is used.
+ * Create the stdin for a widget-input or A2UI-input request. Returns undefined
+ * for other requests, so the default stdin is used.
  */
 export function createWidgetInputStdin(
   options: Stdin.IOptions
@@ -120,17 +128,42 @@ export function createWidgetInputStdin(
     return undefined;
   }
   const trans = current.trans;
+  const isA2ui =
+    typeof options.prompt === 'string' &&
+    options.prompt.startsWith(A2UI_INPUT_MARKER);
+  const failure = (code: string) =>
+    isA2ui
+      ? new WidgetInputError(
+          options,
+          encodeA2uiInputFailure(code),
+          trans.__('A2UI input could not be started.'),
+          trans.__('[A2UI input failed]')
+        )
+      : new WidgetInputError(
+          options,
+          encodeWidgetInputFailure(code),
+          trans.__('Widget input could not be started.'),
+          trans.__('[Widget input failed]')
+        );
 
   let request: IWidgetInputRequest | undefined;
+  let a2uiRequest: A2uiInputRequest | undefined;
   try {
-    request = parseWidgetInputRequest(options.prompt);
+    if (isA2ui) {
+      a2uiRequest = parseA2uiInputRequest(options.prompt);
+    } else {
+      request = parseWidgetInputRequest(options.prompt);
+    }
   } catch (error) {
-    if (!(error instanceof WidgetInputProtocolError)) {
+    if (
+      !(error instanceof WidgetInputProtocolError) &&
+      !(error instanceof A2uiInputError)
+    ) {
       throw error;
     }
-    return new WidgetInputError(options, 'invalid_request', trans);
+    return failure('invalid_request');
   }
-  if (!request) {
+  if (!request && !a2uiRequest) {
     return undefined;
   }
 
@@ -148,27 +181,42 @@ export function createWidgetInputStdin(
     header.msg_type !== 'execute_request' ||
     header.session !== kernel.clientId
   ) {
-    return new WidgetInputError(options, 'owner_unavailable', trans);
+    return failure('owner_unavailable');
   }
-  const input = new WidgetInput(
-    owner.cell,
-    owner.cell.outputArea,
-    owner.panel,
-    kernel,
-    options,
-    current.provider,
-    request,
-    trans
-  );
+  const input = a2uiRequest
+    ? new A2uiInput(
+        owner.cell,
+        owner.cell.outputArea,
+        sessionContext(owner.panel),
+        kernel,
+        options,
+        a2uiRequest,
+        trans
+      )
+    : new WidgetInput(
+        owner.cell,
+        owner.cell.outputArea,
+        owner.panel,
+        kernel,
+        options,
+        current.provider,
+        request!,
+        trans
+      );
   current.activeInputs.add(input);
   input.disposed.connect(() => current.activeInputs.delete(input));
   return input;
 }
 
 class WidgetInputError extends Widget implements IStdin {
-  constructor(options: Stdin.IOptions, code: string, trans: TranslationBundle) {
+  constructor(
+    options: Stdin.IOptions,
+    reply: string,
+    message: string,
+    summary: string
+  ) {
     super();
-    this.node.textContent = trans.__('Widget input could not be started.');
+    this.node.textContent = message;
     // Same hidden sentinel as WidgetInput: OutputArea calls focus() on the first <input>.
     const sentinel = document.createElement('input');
     sentinel.type = 'hidden';
@@ -176,13 +224,13 @@ class WidgetInputError extends Widget implements IStdin {
     queueMicrotask(() => {
       try {
         options.future.sendInputReply(
-          { status: 'ok', value: encodeWidgetInputFailure(code) },
+          { status: 'ok', value: reply },
           options.parent_header
         );
       } catch (error) {
         console.error('Could not send widget input error:', error);
       } finally {
-        this._value.resolve(trans.__('[Widget input failed]'));
+        this._value.resolve(summary);
       }
     });
   }
