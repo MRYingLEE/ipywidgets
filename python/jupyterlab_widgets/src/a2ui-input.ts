@@ -16,6 +16,7 @@ import {
 } from '../vendor/a2ui-form/kernel.js';
 import type { A2uiInputRequest } from '../vendor/a2ui-form/kernel.js';
 import type { A2uiFormHandle } from '../vendor/a2ui-form/form.js';
+import { loadA2uiRenderer } from './a2ui-surface';
 
 export {
   A2UI_INPUT_MARKER,
@@ -88,7 +89,7 @@ export class A2uiInput extends Widget implements IStdin {
   private async _mount(): Promise<void> {
     let handle: A2uiFormHandle;
     try {
-      const { mountA2uiForm } = await import('../vendor/a2ui-form/form.js');
+      const { mountA2uiForm } = await loadA2uiRenderer();
       if (this._settled) {
         return;
       }

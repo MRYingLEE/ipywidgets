@@ -49,6 +49,14 @@ import {
 
 import { OutputModel, OutputView, OUTPUT_WIDGET_VERSION } from './output';
 
+import {
+  A2UI_WIDGET_MODULE,
+  A2UI_WIDGET_VERSION,
+  A2uiSurfaceModel,
+  A2uiSurfaceView,
+  a2uiRendererFactory,
+} from './a2ui-surface';
+
 import * as base from '@jupyter-widgets/base';
 
 // We import only the version from the specific module in controls so that the
@@ -672,6 +680,28 @@ export const outputWidgetPlugin: JupyterFrontEndPlugin<void> = {
   },
 };
 
+/**
+ * A2UI surfaces: the `@jupyter-widgets/a2ui` widget for interactive surfaces
+ * and asynchronous input, and a renderer for static A2UI display data.
+ */
+export const a2uiSurfacePlugin: JupyterFrontEndPlugin<void> = {
+  id: `@jupyter-widgets/jupyterlab-manager:a2ui-${A2UI_WIDGET_VERSION}`,
+  requires: [IRenderMimeRegistry, base.IJupyterWidgetRegistry],
+  autoStart: true,
+  activate: (
+    app: JupyterFrontEnd,
+    rendermime: IRenderMimeRegistry,
+    registry: base.IJupyterWidgetRegistry
+  ): void => {
+    rendermime.addFactory(a2uiRendererFactory);
+    registry.registerWidget({
+      name: A2UI_WIDGET_MODULE,
+      version: A2UI_WIDGET_VERSION,
+      exports: { A2uiSurfaceModel, A2uiSurfaceView },
+    });
+  },
+};
+
 export default [
   managerPlugin,
   widgetManagerProviderPlugin,
@@ -681,6 +711,7 @@ export default [
   baseWidgetsPlugin,
   controlWidgetsPlugin,
   outputWidgetPlugin,
+  a2uiSurfacePlugin,
 ];
 namespace Private {
   /**
