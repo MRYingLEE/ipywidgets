@@ -10,7 +10,7 @@
 // - The stdin A2UI input (a2ui-input.ts) loads the same renderer.
 
 import { DOMWidgetModel, DOMWidgetView } from '@jupyter-widgets/base';
-import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
+import type { IRenderMime } from '@jupyterlab/rendermime-interfaces';
 import { Widget } from '@lumino/widgets';
 
 import { A2uiInputError } from '../vendor/a2ui-form/kernel.js';
@@ -19,9 +19,9 @@ import {
   A2UI_MIME_TYPE,
   A2UI_WIDGET_MODULE,
   A2UI_WIDGET_VERSION,
-  IA2uiSurfaceMessage,
-  IA2uiSurfaceSpec,
-  A2uiSurfaceStatus,
+  type IA2uiSurfaceMessage,
+  type IA2uiSurfaceSpec,
+  type A2uiSurfaceStatus,
   parseA2uiSurface,
   surfaceAction,
   surfaceReply,
