@@ -30,6 +30,30 @@ import {
 
 export * from './a2ui-surface-protocol';
 
+/**
+ * The kernel listens on this channel so a reply or action reaches the
+ * surface while a cell is still running. See the kernel bridge in xeus-x.
+ */
+const OUT_OF_BAND_CHANNEL = 'xeus-x-a2ui-surface';
+let outOfBandChannel: BroadcastChannel | undefined;
+
+function newMessageId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function postOutOfBand(commId: string, content: IA2uiSurfaceMessage): void {
+  if (typeof BroadcastChannel !== 'function') {
+    return;
+  }
+  if (!outOfBandChannel) {
+    outOfBandChannel = new BroadcastChannel(OUT_OF_BAND_CHANNEL);
+  }
+  outOfBandChannel.postMessage({ commId, content });
+}
+
 type A2uiRendererModule = typeof import('../vendor/a2ui-form/form.js');
 
 let rendererModule: Promise<A2uiRendererModule> | undefined;
@@ -311,7 +335,9 @@ export class A2uiSurfaceView extends DOMWidgetView {
   }
 
   private _send(message: IA2uiSurfaceMessage): void {
-    this.send({ ...message });
+    const stamped: IA2uiSurfaceMessage = { ...message, id: newMessageId() };
+    this.send({ ...stamped });
+    postOutOfBand(this.model.model_id, stamped);
   }
 
   private _unmount(): void {

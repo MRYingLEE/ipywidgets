@@ -18,6 +18,24 @@ import {
 const catalogId =
   'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json';
 
+// jsdom replaces the global Event, which Node's BroadcastChannel rejects, so
+// the out-of-band channel is replaced with a recorder. The view caches its
+// channel on first use, so this must be installed before any test runs.
+const outOfBandPosts = [];
+globalThis.BroadcastChannel = class {
+  constructor(name) {
+    this.name = name;
+  }
+
+  postMessage(data) {
+    if (this.name === 'xeus-x-a2ui-surface') {
+      outOfBandPosts.push(data);
+    }
+  }
+
+  close() {}
+};
+
 function button(id, label, name, variant) {
   return [
     {
@@ -159,6 +177,31 @@ test('reports actions and the ending reply over the comm', async () => {
   await settle();
   assert.equal(sent.length, 2);
   assert.equal(view.el.querySelector('input'), null);
+});
+
+test('posts each message on the out-of-band channel with its comm id and message id', async () => {
+  outOfBandPosts.length = 0;
+  const { view, sent } = render({ prompt: 'Who are you?' });
+  const input = await waitFor(() => view.el.querySelector('input'));
+  input.value = 'Ada';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  findButton(view.el, 'Ping').click();
+  await waitFor(() => outOfBandPosts.length === 1);
+  findButton(view.el, 'Submit').click();
+  await waitFor(() => outOfBandPosts.length === 2);
+
+  assert.deepEqual(
+    outOfBandPosts.map(({ commId, content }) => [commId, content.event]),
+    [
+      ['surface', 'action'],
+      ['surface', 'reply'],
+    ]
+  );
+  assert.notEqual(outOfBandPosts[0].content.id, outOfBandPosts[1].content.id);
+  assert.deepEqual(
+    sent.map((content) => content.id),
+    outOfBandPosts.map(({ content }) => content.id)
+  );
 });
 
 test('cancels on Escape only when cancel actions exist', async () => {

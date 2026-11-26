@@ -40,6 +40,8 @@ export interface IA2uiSurfaceSpec {
 export interface IA2uiSurfaceMessage {
   event: 'reply' | 'action';
   reply: string;
+  /** Unique per message, so a copy sent over two channels is handled once. */
+  id?: string;
 }
 
 /**
